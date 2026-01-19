@@ -37,8 +37,8 @@
 
 #ifdef __MINGW32__
 //#include <winsock.h>
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 #include <ws2tcpip.h>
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
@@ -46,6 +46,8 @@
 #ifndef SHUT_RDWR
 #define SHUT_RDWR 2
 #endif
+#define close closesocket
+#define ioctl ioctlsocket
 #endif
 
 #if defined(__unix__) && !defined(__APPLE__)
@@ -150,11 +152,15 @@ static int sam3aSocketSetTimeoutReceive (int fd, int timeoutms) {
 */
 
 static int sam3aBytesAvail(int fd) {
+#ifdef _WIN32
+  u_long av = 0;
+#else
   int av = 0;
+#endif
   //
   if (ioctl(fd, FIONREAD, &av) < 0)
     return -1;
-  return av;
+  return (int)av;
 }
 
 static uint32_t sam3aResolveHost(const char *hostname) {
@@ -183,7 +189,7 @@ static int sam3aConnect(uint32_t ip, int port, int *complete) {
   if ((fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0)) < 0)
     return -1;
   //
-  setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val));
+  setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (const char*)&val, sizeof(val));
   //
   for (;;) {
     struct sockaddr_in addr;
@@ -1044,7 +1050,7 @@ static void aioSesConnected(Sam3ASession *ses) {
   int res;
   socklen_t len = sizeof(res);
   //
-  if (getsockopt(ses->fd, SOL_SOCKET, SO_ERROR, &res, &len) == 0 && res == 0) {
+  if (getsockopt(ses->fd, SOL_SOCKET, SO_ERROR, (char*)&res, &len) == 0 && res == 0) {
     // ok, connected
     if (sam3aSesStartHandshake(ses, NULL) < 0)
       sesError(ses, NULL);
@@ -1500,7 +1506,7 @@ static void aioConnConnected(Sam3AConnection *conn) {
   int res;
   socklen_t len = sizeof(res);
   //
-  if (getsockopt(conn->fd, SOL_SOCKET, SO_ERROR, &res, &len) == 0 && res == 0) {
+  if (getsockopt(conn->fd, SOL_SOCKET, SO_ERROR, (char*)&res, &len) == 0 && res == 0) {
     // ok, connected
     if (sam3aConnStartHandshake(conn, NULL) < 0)
       connError(conn, NULL);
