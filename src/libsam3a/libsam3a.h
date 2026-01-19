@@ -35,8 +35,8 @@
 
 #ifdef __MINGW32__
 //#include <winsock.h>
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 #include <ws2tcpip.h>
 //#define SOCK_CLOEXEC O_CLOEXEC
 //#define SOCK_NONBLOCK O_NONBLOCK

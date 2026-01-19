@@ -38,8 +38,8 @@
 
 #ifdef __MINGW32__
 //#include <winsock.h>
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 #include <ws2tcpip.h>
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
@@ -47,6 +47,7 @@
 #ifndef SHUT_RDWR
 #define SHUT_RDWR 2
 #endif
+#define close closesocket
 #endif
 
 #if defined(__unix__) || defined(__APPLE__)
@@ -96,8 +97,14 @@ int sam3tcpSetTimeoutSend(int fd, int timeoutms) {
     struct timeval tv;
     //
     ms2timeval(&tv, timeoutms);
-    return (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0 ? -1
+#ifdef _WIN32
+    DWORD timeout = timeoutms;
+    return (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout)) < 0 ? -1
                                                                          : 0);
+#else
+    return (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof(tv)) < 0 ? -1
+                                                                         : 0);
+#endif
   }
   return -1;
 }
@@ -107,8 +114,14 @@ int sam3tcpSetTimeoutReceive(int fd, int timeoutms) {
     struct timeval tv;
     //
     ms2timeval(&tv, timeoutms);
-    return (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0 ? -1
+#ifdef _WIN32
+    DWORD timeout = timeoutms;
+    return (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) < 0 ? -1
                                                                          : 0);
+#else
+    return (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv)) < 0 ? -1
+                                                                         : 0);
+#endif
   }
   return -1;
 }
@@ -148,7 +161,7 @@ int sam3tcpConnectIP(uint32_t ip, int port) {
     }
   }
   //
-  setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val));
+  setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (const char*)&val, sizeof(val));
   //
   if (connect(fd, (struct sockaddr *)&addr, sizeof(struct sockaddr_in)) < 0) {
     if (libsam3_debug)
@@ -931,7 +944,7 @@ int sam3CreateSession(Sam3Session *ses, const char *hostname, int port,
         strlen(v) < SAM3_PRIVKEY_MIN_SIZE) {
       if (libsam3_debug)
         fprintf(stderr, "sam3CreateSession: invalid reply (%ld)...\n",
-                (v != NULL ? strlen(v) : -1));
+                (long)(v != NULL ? strlen(v) : -1));
       if (libsam3_debug)
         sam3DumpFieldList(rep);
       sam3FreeFieldList(rep);
@@ -939,7 +952,7 @@ int sam3CreateSession(Sam3Session *ses, const char *hostname, int port,
     }
     // save our keys
     if (strlen(v) > SAM3_PRIVKEY_MAX_SIZE) {
-        fprintf(stderr, "ERROR, Unexpected key size (%li)!\n", strlen(v));
+        fprintf(stderr, "ERROR, Unexpected key size (%li)!\n", (long)strlen(v));
         goto error;
     }
     strcpy(ses->privkey, v);
@@ -955,7 +968,7 @@ int sam3CreateSession(Sam3Session *ses, const char *hostname, int port,
         !sam3CheckValidKeyLength(v)) {
       if (libsam3_debug)
         fprintf(stderr, "sam3CreateSession: invalid NAMING reply (%ld)...\n",
-                (v != NULL ? strlen(v) : -1));
+                (long)(v != NULL ? strlen(v) : -1));
       if (libsam3_debug)
         sam3DumpFieldList(rep);
       sam3FreeFieldList(rep);
