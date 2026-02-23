@@ -64,7 +64,9 @@ extern int libsam3a_debug;
 #define SAM3A_DESTINATION_TRANSIENT (NULL)
 
 #define SAM3A_PUBKEY_SIZE (516)
-#define SAM3A_PRIVKEY_SIZE (884)
+#define SAM3A_CERT_SIZE (3580)
+#define SAM3A_PRIVKEY_SIZE (1024)
+#define SAM3A_PRIVKEY_MAX_SIZE (8192)
 
 ////////////////////////////////////////////////////////////////////////////////
 extern uint64_t sam3atimeval2ms(const struct timeval *tv);
@@ -114,11 +116,11 @@ struct Sam3ASession {
   Sam3ASessionType type; /** session type */
   int fd;                /** socket file descriptor */
   int cancelled;         /** fd was shutdown()ed, but not closed yet */
-  char privkey[SAM3A_PRIVKEY_SIZE + 1]; /**  private key (asciiz) */
-  char pubkey[SAM3A_PUBKEY_SIZE + 1];   /** public key (asciiz) */
+  char privkey[SAM3A_PRIVKEY_MAX_SIZE + 1]; /**  private key (asciiz) */
+  char pubkey[SAM3A_PUBKEY_SIZE + SAM3A_CERT_SIZE + 1];   /** public key (asciiz) */
   char channel[66];                     /** channel name (asciiz) */
-  char destkey[SAM3A_PUBKEY_SIZE + 1];  /** for DGRAM sessions (asciiz) */
-  char error[64];                       /** error message (asciiz) */
+  char destkey[SAM3A_PUBKEY_SIZE + SAM3A_CERT_SIZE + 1];  /** for DGRAM sessions (asciiz) */
+  char error[256];                       /** error message (asciiz) */
   uint32_t ip;                          /** ipv4 address of sam api interface */
   int port;                             /** UDP port for DRAM/RAW (can be 0) */
   Sam3AConnection *connlist;            /** list of opened connections */
@@ -166,8 +168,8 @@ struct Sam3AConnection {
   /** file descriptor */
   int fd;
   int cancelled; // fd was shutdown()ed, but not closed yet
-  char destkey[SAM3A_PUBKEY_SIZE + 1]; // (asciiz)
-  char error[32];                      // (asciiz)
+  char destkey[SAM3A_PUBKEY_SIZE + SAM3A_CERT_SIZE + 1]; // (asciiz)
+  char error[256];                      // (asciiz)
 
   /** begin internal members */
   // for async i/o
