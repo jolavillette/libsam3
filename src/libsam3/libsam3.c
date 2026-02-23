@@ -555,7 +555,7 @@ error:
 // first item is always 2-word reply, with first word in name and second in
 // value
 SAMFieldList *sam3ReadReply(int fd) {
-  char rep[2048]; // should be enough for any reply
+  char rep[8192]; // should be enough for any reply
   //
   if (sam3tcpReceiveStr(fd, rep, sizeof(rep)) < 0)
     return NULL;
@@ -771,9 +771,11 @@ int sam3GenerateKeys(Sam3Session *ses, const char *hostname, int port,
       strcpyerr(ses, "PRIVKEY_ERROR");
     }
     const char *pub = sam3FindField(rep, "PUB");
-    strcpy(ses->pubkey, pub);
+    strncpy(ses->pubkey, pub, sizeof(ses->pubkey) - 1);
+    ses->pubkey[sizeof(ses->pubkey) - 1] = 0;
     const char *priv = sam3FindField(rep, "PRIV");
-    strcpy(ses->privkey, priv);
+    strncpy(ses->privkey, priv, sizeof(ses->privkey) - 1);
+    ses->privkey[sizeof(ses->privkey) - 1] = 0;
     res = 0;
     //
     sam3FreeFieldList(rep);
@@ -804,7 +806,8 @@ int sam3NameLookup(Sam3Session *ses, const char *hostname, int port,
         //
         if (strcmp(rs, "OK") == 0) {
           if (pub != NULL && sam3CheckValidKeyLength(pub)) {
-            strcpy(ses->destkey, pub);
+            strncpy(ses->destkey, pub, sizeof(ses->destkey) - 1);
+            ses->destkey[sizeof(ses->destkey) - 1] = 0;
             strcpyerr(ses, NULL);
             res = 0;
           }
@@ -939,10 +942,11 @@ int sam3CreateSession(Sam3Session *ses, const char *hostname, int port,
     }
     // save our keys
     if (strlen(v) > SAM3_PRIVKEY_MAX_SIZE) {
-        fprintf(stderr, "ERROR, Unexpected key size (%li)!\n", strlen(v));
+        fprintf(stderr, "ERROR, Unexpected key size (%li)!\n", (long)strlen(v));
         goto error;
     }
-    strcpy(ses->privkey, v);
+    strncpy(ses->privkey, v, sizeof(ses->privkey) - 1);
+    ses->privkey[sizeof(ses->privkey) - 1] = 0;
     sam3FreeFieldList(rep);
     // get public key
     if (sam3tcpPrintf(ses->fd, "NAMING LOOKUP NAME=ME\n") < 0)
@@ -961,7 +965,8 @@ int sam3CreateSession(Sam3Session *ses, const char *hostname, int port,
       sam3FreeFieldList(rep);
       goto error;
     }
-    strcpy(ses->pubkey, v);
+    strncpy(ses->pubkey, v, sizeof(ses->pubkey) - 1);
+    ses->pubkey[sizeof(ses->pubkey) - 1] = 0;
     sam3FreeFieldList(rep);
     //
     if (libsam3_debug)
@@ -1029,7 +1034,8 @@ Sam3Connection *sam3StreamConnect(Sam3Session *ses, const char *destkey) {
     }
     sam3FreeFieldList(rep);
     if (conn != NULL) {
-      strcpy(conn->destkey, destkey);
+      strncpy(conn->destkey, destkey, sizeof(conn->destkey) - 1);
+      conn->destkey[sizeof(conn->destkey) - 1] = 0;
       conn->ses = ses;
       conn->next = ses->connlist;
       ses->connlist = conn;
@@ -1046,7 +1052,7 @@ Sam3Connection *sam3StreamConnect(Sam3Session *ses, const char *destkey) {
 Sam3Connection *sam3StreamAccept(Sam3Session *ses) {
   if (ses != NULL) {
     SAMFieldList *rep = NULL;
-    char repstr[1024];
+    char repstr[8192];
     Sam3Connection *conn;
     //
     if (ses->type != SAM3_SESSION_STREAM) {
@@ -1097,7 +1103,8 @@ Sam3Connection *sam3StreamAccept(Sam3Session *ses) {
       goto error;
     }
     sam3FreeFieldList(rep);
-    strcpy(conn->destkey, repstr);
+    strncpy(conn->destkey, repstr, sizeof(conn->destkey) - 1);
+    conn->destkey[sizeof(conn->destkey) - 1] = 0;
     conn->ses = ses;
     conn->next = ses->connlist;
     ses->connlist = conn;
@@ -1235,8 +1242,10 @@ ssize_t sam3DatagramReceive(Sam3Session *ses, void *buf, size_t bufsize) {
     }
     //
     if ((v = sam3FindField(rep, "DESTINATION")) != NULL &&
-        sam3CheckValidKeyLength(v))
-      strncpy(ses->destkey, v, sizeof(ses->destkey));
+        sam3CheckValidKeyLength(v)) {
+      strncpy(ses->destkey, v, sizeof(ses->destkey) - 1);
+      ses->destkey[sizeof(ses->destkey) - 1] = 0;
+    }
     v = sam3FindField(rep, "SIZE"); // we have this field -- for sure
     if (!v[0] || !isdigit(*v)) {
       strcpyerr(ses, "I2P_ERROR_SIZE");
