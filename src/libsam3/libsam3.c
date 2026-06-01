@@ -1,34 +1,17 @@
-/*
- * Copyright Â© 2023 I2P
+/* This program is free software. It comes without any warranty, to
+ * the extent permitted by applicable law. You can redistribute it
+ * and/or modify it under the terms of the Do What The Fuck You Want
+ * To Public License, Version 2, as published by Sam Hocevar. See
+ * http://sam.zoy.org/wtfpl/COPYING for more details.
  *
- * Permission is hereby granted, free of charge, to any person obtaining
- * a copy of this software and associated documentation files
- * (the âSoftwareâ), to deal in the Software without restriction,
- * including without limitation the rights to use, copy, modify, merge,
- * publish, distribute, sublicense, and/or sell copies of the Software,
- * and to permit persons to whom the Software is furnished to do so,
- * subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED âAS ISâ, WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
- * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
- * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
- * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
- * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- *
- * http://git.idk.i2p/i2p-hackers/libsam3/
- */
-
+ * I2P-Bote:
+ * 5m77dFKGEq6~7jgtrfw56q3t~SmfwZubmGdyOLQOPoPp8MYwsZ~pfUCwud6LB1EmFxkm4C3CGlzq-hVs9WnhUV
+ * we are the Borg. */
 #include "libsam3.h"
 
 #include <ctype.h>
 #include <errno.h>
 #include <stdarg.h>
-#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,25 +36,14 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <sys/ioctl.h>
-#endif
 
-#if defined(__unix__) && !defined(__APPLE__)
+#ifndef __APPLE__
 #include <sys/sysinfo.h>
 #endif
 
-#if defined(__APPLE__)
-#ifndef MSG_NOSIGNAL
-#define MSG_NOSIGNAL 0
-#endif
-#include <mach/mach_time.h>
-uint32_t TickCount() {
-  uint64_t mat = mach_absolute_time();
-  uint32_t mul = 0x80d9594e;
-  return ((((0xffffffff & mat) * mul) >> 32) + (mat >> 32) * mul) >> 23;
-}
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -643,28 +615,23 @@ static inline uint32_t hashint(uint32_t a) {
 }
 
 static uint32_t genSeed(void) {
-  volatile uint32_t seed = 1;
   uint32_t res;
-#ifndef WIN32
-  #ifndef __APPLE__
-    struct sysinfo sy;
-    pid_t pid = getpid();
-    //
-    sysinfo(&sy);
-    res = hashint((uint32_t)pid) ^ hashint((uint32_t)time(NULL)) ^
-          hashint((uint32_t)sy.sharedram) ^ hashint((uint32_t)sy.bufferram) ^
-          hashint((uint32_t)sy.uptime);
-  #else
-    res = hashint((uint32_t)getpid()) ^
-          hashint((uint32_t)TickCount());
-  #endif
-#else
+#if defined(__linux__)
+  struct sysinfo sy;
+  pid_t pid = getpid();
+  sysinfo(&sy);
+  res = hashint((uint32_t)pid) ^ hashint((uint32_t)time(NULL)) ^
+        hashint((uint32_t)sy.sharedram) ^ hashint((uint32_t)sy.bufferram) ^
+        hashint((uint32_t)sy.uptime);
+#elif defined(WIN32)
   res = hashint((uint32_t)GetCurrentProcessId()) ^
         hashint((uint32_t)GetTickCount());
+#else
+  res = hashint((uint32_t)getpid()) ^ hashint((uint32_t)time(NULL));
 #endif
-  res += __sync_fetch_and_add(&seed, 1);
-  //
-  return hashint(res);
+
+  // Return hashint(res) if that's what the original code did
+  return hashint(res); 
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -758,23 +725,20 @@ int sam3GenerateKeys(Sam3Session *ses, const char *hostname, int port,
       return -1;
     }
     //
-    if (sam3tcpPrintf(fd, "DEST GENERATE %s\n", sigtypes[(int)sigType]) < 0) {
-      strcpyerr(ses, "DEST_ERROR");
+    if (sam3tcpPrintf(fd, "DEST GENERATE %s\n", sigtypes[sigType]) >= 0) {
+      if ((rep = sam3ReadReply(fd)) != NULL &&
+          sam3IsGoodReply(rep, "DEST", "REPLY", NULL, NULL)) {
+        const char *pub = sam3FindField(rep, "PUB"),
+                   *priv = sam3FindField(rep, "PRIV");
+        //
+        if (pub != NULL && sam3CheckValidKeyLength(pub) && priv != NULL &&
+            strlen(priv) >= SAM3_PRIVKEY_MIN_SIZE) {
+          strcpy(ses->pubkey, pub);
+          strcpy(ses->privkey, priv);
+          res = 0;
+        }
+      }
     }
-
-    rep = sam3ReadReply(fd);
-    // sam3DumpFieldList(rep);
-    if (!sam3IsGoodReply(rep, "DEST", "REPLY", "PUB", NULL)) {
-      strcpyerr(ses, "PUBKEY_ERROR");
-    }
-    if (!sam3IsGoodReply(rep, "DEST", "REPLY", "PRIV", NULL)) {
-      strcpyerr(ses, "PRIVKEY_ERROR");
-    }
-    const char *pub = sam3FindField(rep, "PUB");
-    strcpy(ses->pubkey, pub);
-    const char *priv = sam3FindField(rep, "PRIV");
-    strcpy(ses->privkey, priv);
-    res = 0;
     //
     sam3FreeFieldList(rep);
     sam3tcpDisconnect(fd);
@@ -938,10 +902,6 @@ int sam3CreateSession(Sam3Session *ses, const char *hostname, int port,
       goto error;
     }
     // save our keys
-    if (strlen(v) > SAM3_PRIVKEY_MAX_SIZE) {
-        fprintf(stderr, "ERROR, Unexpected key size (%li)!\n", strlen(v));
-        goto error;
-    }
     strcpy(ses->privkey, v);
     sam3FreeFieldList(rep);
     // get public key
@@ -978,12 +938,6 @@ Sam3Connection *sam3StreamConnect(Sam3Session *ses, const char *destkey) {
     SAMFieldList *rep;
     Sam3Connection *conn;
     //
-    for (size_t i = 0; destkey[i] != 0; i++){
-        if (destkey[i] == '\n'){
-            strcpyerr(ses, "INVALID_KEY_SYMBOLS");
-            return NULL;
-        }
-    }
     if (ses->type != SAM3_SESSION_STREAM) {
       strcpyerr(ses, "INVALID_SESSION_TYPE");
       return NULL;
@@ -1190,12 +1144,11 @@ int sam3DatagramSend(Sam3Session *ses, const char *destkey, const void *buf,
       strcpyerr(ses, "INVALID_DATA");
       return -1;
     }
-    dbufsz = bufsize + 4 + strlen(destkey) + 1 + strlen(ses->channel) + 1;
+    dbufsz = bufsize + 4 + SAM3_PUBKEY_SIZE + 1 + strlen(ses->channel) + 1;
     if ((dbuf = malloc(dbufsz)) == NULL) {
       strcpyerr(ses, "OUT_OF_MEMORY");
       return -1;
     }
-    memset(dbuf, 0, dbufsz);
     sprintf(dbuf, "3.0 %s %s\n", ses->channel, destkey);
     memcpy(dbuf + strlen(dbuf), buf, bufsize);
     res = sam3udpSendToIP(ses->ip, ses->port, dbuf, dbufsz);

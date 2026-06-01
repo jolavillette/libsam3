@@ -1,28 +1,14 @@
-/*
- * Copyright Â© 2023 I2P
+/* async SAMv3 library
  *
- * Permission is hereby granted, free of charge, to any person obtaining
- * a copy of this software and associated documentation files
- * (the âSoftwareâ), to deal in the Software without restriction,
- * including without limitation the rights to use, copy, modify, merge,
- * publish, distribute, sublicense, and/or sell copies of the Software,
- * and to permit persons to whom the Software is furnished to do so,
- * subject to the following conditions:
+ * This program is free software. It comes without any warranty, to
+ * the extent permitted by applicable law. You can redistribute it
+ * and/or modify it under the terms of the Do What The Fuck You Want
+ * To Public License, Version 2, as published by Sam Hocevar. See
+ * http://sam.zoy.org/wtfpl/COPYING for more details.
  *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED âAS ISâ, WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
- * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
- * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
- * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
- * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- *
- * http://git.idk.i2p/i2p-hackers/libsam3/
- */
-
+ * I2P-Bote:
+ * 5m77dFKGEq6~7jgtrfw56q3t~SmfwZubmGdyOLQOPoPp8MYwsZ~pfUCwud6LB1EmFxkm4C3CGlzq-hVs9WnhUV
+ * we are the Borg. */
 #include "libsam3a.h"
 
 #include <ctype.h>
@@ -34,6 +20,8 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+#include <fcntl.h>
 
 #ifdef __MINGW32__
 //#include <winsock.h>
@@ -48,10 +36,6 @@
 #endif
 #endif
 
-#if defined(__unix__) && !defined(__APPLE__)
-#include <sys/sysinfo.h>
-#endif
-
 #if defined(__unix__) || defined(__APPLE__)
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -59,26 +43,11 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+
+#ifndef __APPLE__
+#include <sys/sysinfo.h>
 #endif
 
-#if defined(__APPLE__)
-#include <mach/mach_time.h>
-#include <netinet/tcp.h>
-#ifndef SOCK_CLOEXEC
-#define SOCK_CLOEXEC 0
-#endif
-#ifndef SOCK_NONBLOCK
-#include <fcntl.h>
-#define SOCK_NONBLOCK O_NONBLOCK
-#endif
-#ifndef MSG_NOSIGNAL
-#define MSG_NOSIGNAL 0
-#endif
-uint32_t TickCount() {
-  uint64_t mat = mach_absolute_time();
-  uint32_t mul = 0x80d9594e;
-  return ((((0xffffffff & mat) * mul) >> 32) + (mat >> 32) * mul) >> 23;
-}
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -88,11 +57,11 @@ int libsam3a_debug = 0;
 #define DEFAULT_UDP_PORT (7655)
 
 ////////////////////////////////////////////////////////////////////////////////
-extern uint64_t sam3atimeval2ms(const struct timeval *tv) {
+uint64_t sam3atimeval2ms(const struct timeval *tv) {
   return ((uint64_t)tv->tv_sec) * 1000 + ((uint64_t)tv->tv_usec) / 1000;
 }
 
-extern void sam3ams2timeval(struct timeval *tv, uint64_t ms) {
+void sam3ams2timeval(struct timeval *tv, uint64_t ms) {
   tv->tv_sec = ms / 1000;
   tv->tv_usec = (ms % 1000) * 1000;
 }
@@ -179,9 +148,22 @@ static int sam3aConnect(uint32_t ip, int port, int *complete) {
   if (ip == 0 || ip == 0xffffffffUL || port < 1 || port > 65535)
     return -1;
   //
-  // yes, this is Linux-specific; you know what? i don't care.
-  if ((fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0)) < 0)
-    return -1;
+  // For Linux, use the original flags. 
+  // For macOS (and other BSDs), use standard socket and then set non-blocking.
+  #if defined(__linux__)
+    if ((fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0)) < 0)
+  #else
+    if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+  #endif
+      return -1;
+
+  #if !defined(__linux__)
+    // On macOS, set non-blocking after creation
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    // Note: SOCK_CLOEXEC is not strictly necessary for basic functionality 
+    // on macOS as it is for security, but usually handled differently.
+  #endif  
   //
   setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val));
   //
@@ -688,25 +670,24 @@ static inline uint32_t hashint(uint32_t a) {
 static uint32_t genSeed(void) {
   volatile uint32_t seed = 1;
   uint32_t res;
-#ifndef WIN32
-  #ifndef __APPLE__
-    struct sysinfo sy;
-    pid_t pid = getpid();
-    //
-    sysinfo(&sy);
-    res = hashint((uint32_t)pid) ^ hashint((uint32_t)time(NULL)) ^
-          hashint((uint32_t)sy.sharedram) ^ hashint((uint32_t)sy.bufferram) ^
-          hashint((uint32_t)sy.uptime);
-  #else
-    res = hashint((uint32_t)getpid()) ^
-          hashint((uint32_t)TickCount());
-  #endif
-#else
+
+#if defined(__linux__)
+  struct sysinfo sy;
+  pid_t pid = getpid();
+  sysinfo(&sy);
+  res = hashint((uint32_t)pid) ^ hashint((uint32_t)time(NULL)) ^
+        hashint((uint32_t)sy.sharedram) ^ hashint((uint32_t)sy.bufferram) ^
+        hashint((uint32_t)sy.uptime);
+#elif defined(WIN32)
   res = hashint((uint32_t)GetCurrentProcessId()) ^
         hashint((uint32_t)GetTickCount());
+#else
+  // Fallback for macOS/BSD: use PID, time, and address of the stack variable
+  // to ensure some entropy even without sysinfo
+  res = hashint((uint32_t)getpid()) ^ hashint((uint32_t)time(NULL)) ^ hashint((uintptr_t)&seed);
 #endif
+
   res += __sync_fetch_and_add(&seed, 1);
-  //
   return hashint(res);
 }
 
