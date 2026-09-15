@@ -771,25 +771,35 @@ int sam3GenerateKeys(Sam3Session *ses, const char *hostname, int port,
       return -1;
     }
     //
+    if (sigType < 0 || sigType >= (int)(sizeof(sigtypes) / sizeof(sigtypes[0]))) {
+      strcpyerr(ses, "INVALID_SIGTYPE");
+      sam3tcpDisconnect(fd);
+      return -1;
+    }
     if (sam3tcpPrintf(fd, "DEST GENERATE %s\n", sigtypes[(int)sigType]) < 0) {
       strcpyerr(ses, "DEST_ERROR");
+      sam3tcpDisconnect(fd);
+      return -1;
     }
 
     rep = sam3ReadReply(fd);
     // sam3DumpFieldList(rep);
-    if (!sam3IsGoodReply(rep, "DEST", "REPLY", "PUB", NULL)) {
-      strcpyerr(ses, "PUBKEY_ERROR");
-    }
-    if (!sam3IsGoodReply(rep, "DEST", "REPLY", "PRIV", NULL)) {
-      strcpyerr(ses, "PRIVKEY_ERROR");
-    }
     const char *pub = sam3FindField(rep, "PUB");
-    strncpy(ses->pubkey, pub, sizeof(ses->pubkey) - 1);
-    ses->pubkey[sizeof(ses->pubkey) - 1] = 0;
     const char *priv = sam3FindField(rep, "PRIV");
-    strncpy(ses->privkey, priv, sizeof(ses->privkey) - 1);
-    ses->privkey[sizeof(ses->privkey) - 1] = 0;
-    res = 0;
+    if (!sam3IsGoodReply(rep, "DEST", "REPLY", NULL, NULL)) {
+      strcpyerr(ses, "DEST_ERROR");
+    } else if (pub == NULL || !sam3CheckValidKeyLength(pub)) {
+      strcpyerr(ses, "PUBKEY_ERROR");
+    } else if (priv == NULL || strlen(priv) < SAM3_PRIVKEY_MIN_SIZE ||
+               strlen(priv) > SAM3_PRIVKEY_MAX_SIZE) {
+      strcpyerr(ses, "PRIVKEY_ERROR");
+    } else {
+      strncpy(ses->pubkey, pub, sizeof(ses->pubkey) - 1);
+      ses->pubkey[sizeof(ses->pubkey) - 1] = 0;
+      strncpy(ses->privkey, priv, sizeof(ses->privkey) - 1);
+      ses->privkey[sizeof(ses->privkey) - 1] = 0;
+      res = 0;
+    }
     //
     sam3FreeFieldList(rep);
     sam3tcpDisconnect(fd);
