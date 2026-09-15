@@ -63,16 +63,13 @@
 #include <sys/types.h>
 #endif
 
+#if defined(__unix__) || defined(__APPLE__)
+#include <fcntl.h>
+#endif
+
 #if defined(__APPLE__)
 #include <mach/mach_time.h>
 #include <netinet/tcp.h>
-#ifndef SOCK_CLOEXEC
-#define SOCK_CLOEXEC 0
-#endif
-#ifndef SOCK_NONBLOCK
-#include <fcntl.h>
-#define SOCK_NONBLOCK O_NONBLOCK
-#endif
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
 #endif
@@ -185,9 +182,34 @@ static int sam3aConnect(uint32_t ip, int port, int *complete) {
   if (ip == 0 || ip == 0xffffffffUL || port < 1 || port > 65535)
     return -1;
   //
-  // yes, this is Linux-specific; you know what? i don't care.
+#if defined(SOCK_NONBLOCK) && defined(SOCK_CLOEXEC)
+  // Linux (and BSDs that support it): atomic non-blocking + close-on-exec
   if ((fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0)) < 0)
     return -1;
+#else
+  // macOS and Windows have no SOCK_NONBLOCK/SOCK_CLOEXEC socket() flags:
+  // create a plain socket, then switch it to non-blocking mode.
+  if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    return -1;
+#if defined(_WIN32) || defined(__MINGW32__)
+  {
+    u_long mode = 1;
+    if (ioctlsocket(fd, FIONBIO, &mode) != 0) {
+      close(fd);
+      return -1;
+    }
+  }
+#else
+  {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+      close(fd);
+      return -1;
+    }
+    fcntl(fd, F_SETFD, FD_CLOEXEC);
+  }
+#endif
+#endif
   //
   setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (const char*)&val, sizeof(val));
   //
