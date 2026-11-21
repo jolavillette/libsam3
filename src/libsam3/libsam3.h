@@ -53,9 +53,9 @@ extern int libsam3_debug;
 #define SAM3_DESTINATION_TRANSIENT (NULL)
 
 #define SAM3_PUBKEY_SIZE (516)
-#define SAM3_CERT_SIZE (100)
-#define SAM3_PRIVKEY_MIN_SIZE (884)
-#define SAM3_PRIVKEY_MAX_SIZE (1024)
+#define SAM3_CERT_SIZE (3580)
+#define SAM3_PRIVKEY_MIN_SIZE (256)
+#define SAM3_PRIVKEY_MAX_SIZE (8192)
 
 ////////////////////////////////////////////////////////////////////////////////
 /* returns fd or -1 */
@@ -160,7 +160,7 @@ typedef struct Sam3Session {
   char destkey[SAM3_PUBKEY_SIZE + SAM3_CERT_SIZE +
                1]; // for DGRAM sessions (asciiz)
   // int destsig;
-  char error[32]; // error message (asciiz)
+  char error[256]; // error message (asciiz)
   uint32_t ip;
   int port; // this will be changed to UDP port for DRAM/RAW (can be 0)
   struct Sam3Connection *connlist; // list of opened connections
@@ -175,7 +175,7 @@ typedef struct Sam3Connection {
   char destkey[SAM3_PUBKEY_SIZE + SAM3_CERT_SIZE +
                1]; // remote destination public key (asciiz)
   int destcert;
-  char error[32]; // error message (asciiz)
+  char error[256]; // error message (asciiz)
 } Sam3Connection;
 
 ////////////////////////////////////////////////////////////////////////////////
