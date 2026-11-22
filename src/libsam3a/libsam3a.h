@@ -38,10 +38,6 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <ws2tcpip.h>
-//#define SOCK_CLOEXEC O_CLOEXEC
-//#define SOCK_NONBLOCK O_NONBLOCK
-#define SOCK_CLOEXEC 02000000
-#define SOCK_NONBLOCK FIONBIO
 #endif
 
 #ifdef __cplusplus
