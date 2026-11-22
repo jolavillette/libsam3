@@ -97,29 +97,32 @@ extern void sam3ams2timeval(struct timeval *tv, uint64_t ms) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// I2P base64 alphabet, '=' is the padding
 static inline int isValidKeyChar(char ch) {
   return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-         (ch >= '0' && ch <= '9') || ch == '-' || ch == '~';
+         (ch >= '0' && ch <= '9') || ch == '-' || ch == '~' || ch == '=';
+}
+
+static int isValidKey(const char *key, size_t minlen, size_t maxlen) {
+  size_t len;
+  //
+  if (key == NULL)
+    return 0;
+  len = strlen(key);
+  if (len < minlen || len > maxlen)
+    return 0;
+  for (size_t f = 0; f < len; ++f)
+    if (!isValidKeyChar(key[f]))
+      return 0;
+  return 1;
 }
 
 int sam3aIsValidPubKey(const char *key) {
-  if (key != NULL && strlen(key) >= SAM3A_PUBKEY_SIZE) {
-    for (int f = 0; f < (int)strlen(key); ++f)
-      if (!isValidKeyChar(key[f]))
-        return 0;
-    return 1;
-  }
-  return 0;
+  return isValidKey(key, SAM3A_PUBKEY_SIZE, SAM3A_PUBKEY_SIZE + SAM3A_CERT_SIZE);
 }
 
 int sam3aIsValidPrivKey(const char *key) {
-  if (key != NULL && strlen(key) >= SAM3A_PRIVKEY_SIZE) {
-    for (int f = 0; f < (int)strlen(key); ++f)
-      if (!isValidKeyChar(key[f]))
-        return 0;
-    return 1;
-  }
-  return 0;
+  return isValidKey(key, SAM3A_PRIVKEY_MIN_SIZE, SAM3A_PRIVKEY_MAX_SIZE);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1007,8 +1010,7 @@ static void aioSesNameMeChecker(Sam3ASession *ses) {
     return;
   }
   if (!sam3aIsGoodReply(rep, "NAMING", "REPLY", "RESULT", "OK") ||
-      (v = sam3aFindField(rep, "VALUE")) == NULL ||
-      strlen(v) < SAM3A_PUBKEY_SIZE) {
+      !sam3aIsValidPubKey(v = sam3aFindField(rep, "VALUE"))) {
     // if (libsam3a_debug) fprintf(stderr, "sam3aCreateSession: invalid NAMING
     // reply (%d)...\n", (v != NULL ? strlen(v) : -1));
     if ((v = sam3aFindField(rep, "RESULT")) != NULL && strcmp(v, "OK") == 0)
@@ -1036,12 +1038,11 @@ static void aioSesCreateChecker(Sam3ASession *ses) {
     return;
   }
   if (!sam3aIsGoodReply(rep, "SESSION", "STATUS", "RESULT", "OK") ||
-      (v = sam3aFindField(rep, "DESTINATION")) == NULL ||
-      strlen(v) < SAM3A_PRIVKEY_SIZE) {
-    sam3aFreeFieldList(rep);
+      !sam3aIsValidPrivKey(v = sam3aFindField(rep, "DESTINATION"))) {
     if ((v = sam3aFindField(rep, "RESULT")) != NULL && strcmp(v, "OK") == 0)
       v = NULL;
     sesError(ses, v);
+    sam3aFreeFieldList(rep);
     return;
   }
   // ok
@@ -1100,7 +1101,7 @@ int sam3aCreateSessionEx(Sam3ASession *ses, const Sam3ASessionCallbacks *cb,
       hostname = "127.0.0.1";
     if (port < 0 || port > 65535)
       goto error;
-    if (privkey != NULL && strlen(privkey) != SAM3A_PRIVKEY_SIZE)
+    if (privkey != NULL && !sam3aIsValidPrivKey(privkey))
       goto error;
     if ((int)type < 0 || (int)type > 2)
       goto error;
@@ -1182,8 +1183,7 @@ static void aioSesKeyGenChecker(Sam3ASession *ses) {
     const char *pub = sam3aFindField(rep, "PUB"),
                *priv = sam3aFindField(rep, "PRIV");
     //
-    if (pub != NULL && strlen(pub) >= SAM3A_PUBKEY_SIZE && priv != NULL &&
-        strlen(priv) >= SAM3A_PRIVKEY_SIZE) {
+    if (sam3aIsValidPubKey(pub) && sam3aIsValidPrivKey(priv)) {
       strncpy(ses->pubkey, pub, sizeof(ses->pubkey) - 1);
       ses->pubkey[sizeof(ses->pubkey) - 1] = 0;
       strncpy(ses->privkey, priv, sizeof(ses->privkey) - 1);
@@ -1256,7 +1256,7 @@ static void aioSesNameResChecker(Sam3ASession *ses) {
                *pub = sam3aFindField(rep, "VALUE");
     //
     if (strcmp(rs, "OK") == 0) {
-      if (pub != NULL && strlen(pub) >= SAM3A_PUBKEY_SIZE) {
+      if (sam3aIsValidPubKey(pub)) {
         strncpy(ses->destkey, pub, sizeof(ses->destkey) - 1);
         ses->destkey[sizeof(ses->destkey) - 1] = 0;
         sam3aFreeFieldList(rep);
@@ -1586,7 +1586,7 @@ Sam3AConnection *sam3aStreamConnectEx(Sam3ASession *ses,
                                       const Sam3AConnectionCallbacks *cb,
                                       const char *destkey, int timeoutms) {
   if (sam3aIsActiveSession(ses) && ses->type == SAM3A_SESSION_STREAM &&
-      destkey != NULL && strlen(destkey) >= SAM3A_PUBKEY_SIZE) {
+      sam3aIsValidPubKey(destkey)) {
     Sam3AConnection *conn = calloc(1, sizeof(Sam3AConnection));
     //
     if (conn == NULL)
@@ -1619,8 +1619,7 @@ Sam3AConnection *sam3aStreamConnectEx(Sam3ASession *ses,
 static void aioConnAcceptCheckerA(Sam3AConnection *conn) {
   SAMFieldList *rep = sam3aParseReply(conn->aio.data);
   //
-  if (rep != NULL || strlen(conn->aio.data) < SAM3A_PUBKEY_SIZE ||
-      !sam3aIsValidPubKey(conn->aio.data)) {
+  if (rep != NULL || !sam3aIsValidPubKey(conn->aio.data)) {
     sam3aFreeFieldList(rep);
     connError(conn, NULL);
     return;
@@ -1654,18 +1653,18 @@ static void aioConnAcceptChecker(Sam3AConnection *conn) {
   } else {
     // no error
     sam3aFreeFieldList(rep);
-    // 2048 bytes of reply line should be enough
-    if (conn->aio.dataSize < 2049) {
-      char *n = realloc(conn->aio.data, 2049);
+    // 8192 bytes of reply line should be enough
+    if (conn->aio.dataSize < 8193) {
+      char *n = realloc(conn->aio.data, 8193);
       //
       if (n == NULL) {
         connError(conn, "MEMORY_ERROR");
         return;
       }
       conn->aio.data = n;
-      conn->aio.dataSize = 2049;
+      conn->aio.dataSize = 8193;
     }
-    conn->aio.dataUsed = 2048;
+    conn->aio.dataUsed = 8192;
     conn->aio.dataPos = 0;
     conn->cbAIOProcessorR = aioConnCmdReplyReader;
     conn->cbAIOProcessorW = NULL;

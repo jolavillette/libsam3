@@ -65,8 +65,10 @@ extern int libsam3a_debug;
 
 #define SAM3A_PUBKEY_SIZE (516)
 #define SAM3A_CERT_SIZE (3580)
-#define SAM3A_PRIVKEY_SIZE (1024)
+#define SAM3A_PRIVKEY_MIN_SIZE (256)
 #define SAM3A_PRIVKEY_MAX_SIZE (8192)
+/* size of a private key buffer (without the terminating zero), not of a key */
+#define SAM3A_PRIVKEY_SIZE (SAM3A_PRIVKEY_MAX_SIZE)
 
 ////////////////////////////////////////////////////////////////////////////////
 extern uint64_t sam3atimeval2ms(const struct timeval *tv);
